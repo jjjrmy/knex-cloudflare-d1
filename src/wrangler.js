@@ -56,6 +56,8 @@ function executeQuery(connection, query, bindings = [], flags = []) {
     });
   }
 
+  console.log('wranglerArgs', wranglerArgs);
+
   const result = spawnSync('wrangler', wranglerArgs, { 
     stdio: 'pipe',
     encoding: 'utf-8'
