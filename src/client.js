@@ -133,4 +133,9 @@ class Client_D1 extends Client_Sqlite3 {
   }
 }
 
+Object.assign(Client_D1.prototype, {
+  dialect: "sqlite3",
+  driverName: "knex-cloudflare-d1",
+});
+
 module.exports = Client_D1;
