@@ -1,26 +1,26 @@
-const Client_Sqlite3 = require('knex/lib/dialects/sqlite3/index');
+const Client_Sqlite3 = require("knex/lib/dialects/sqlite3/index");
 
 class Client_D1 extends Client_Sqlite3 {
   constructor(config) {
     super({
       ...config,
       connection: {
-        filename: 'db',
+        ...config.connection,
+        filename: ":memory:",
       },
     });
 
     if (!config?.connection?.database) {
-      this.logger.warn(
-        'Could not find `connection.database` in config.'
-      );
+      this.logger.warn("Could not find `connection.database` in config.");
     }
 
-    this.driverName = 'd1';
+    this.driverName = "d1";
     this.d1Driver = config.connection.database;
-    this.driver = config.connection.database
+    this.driver = config.connection.database;
+    this.workerContext = config?.connection?.database instanceof Object;
   }
 
-  _driver () {
+  _driver() {
     return this.d1Driver;
   }
 
@@ -37,28 +37,38 @@ class Client_D1 extends Client_Sqlite3 {
   // Runs the query on the specified connection, providing the bindings and any
   // other necessary prep work.
   async _query(connection, obj) {
-    if (!obj.sql) throw new Error('The query is empty');
+    if (!obj.sql) throw new Error("The query is empty");
 
-    if (obj.sql.startsWith('BEGIN') || obj.sql.startsWith('COMMIT') || obj.sql.startsWith('ROLLBACK')) {
+    return this.workerContext
+      ? this._queryD1(connection, obj)
+      : this._queryWrangler(connection, obj);
+  }
+
+  async _queryD1(connection, obj) {
+    if (
+      obj.sql.startsWith("BEGIN") ||
+      obj.sql.startsWith("COMMIT") ||
+      obj.sql.startsWith("ROLLBACK")
+    ) {
       this.logger.warn(
         "[WARN] D1 doesn't support transactions, see https://blog.cloudflare.com/whats-new-with-d1/"
-      )
+      );
       return;
     }
 
     const { method } = obj;
     let callMethod;
     switch (method) {
-      case 'insert':
-      case 'update':
-        callMethod = obj.returning ? 'all' : 'run';
+      case "insert":
+      case "update":
+        callMethod = obj.returning ? "all" : "run";
         break;
-      case 'counter':
-      case 'del':
-        callMethod = 'run';
+      case "counter":
+      case "del":
+        callMethod = "run";
         break;
       default:
-        callMethod = 'all';
+        callMethod = "all";
     }
 
     if (!connection) {
@@ -77,15 +87,37 @@ class Client_D1 extends Client_Sqlite3 {
     return obj;
   }
 
+  async _queryWrangler(connection, obj) {
+    const { executeQuery } = require("./wrangler");
+
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(obj.sql.replace(/;$/, ""))) {
+      console.warn(
+        "[WARN] D1 doesn't support transactions, see https://blog.cloudflare.com/whats-new-with-d1/"
+      );
+      return Promise.resolve();
+    }
+
+    const [{ results }] = await executeQuery(
+      connection,
+      obj.sql,
+      obj.bindings,
+      this.config.connection?.flags
+    );
+
+    obj.response = results;
+    obj.context = this;
+    return obj;
+  }
+
   _stream(connection, obj, stream) {
-    if (!obj.sql) throw new Error('The query is empty');
+    if (!obj.sql) throw new Error("The query is empty");
 
     const client = this;
-    stream.on('error', (error) => {
-      throw error
+    stream.on("error", (error) => {
+      throw error;
     });
-    stream.on('end', () => {
-      stream.emit('finish');
+    stream.on("end", () => {
+      stream.emit("finish");
     });
 
     return client
@@ -93,12 +125,12 @@ class Client_D1 extends Client_Sqlite3 {
       .then((obj) => obj.response)
       .then((rows) => rows.forEach((row) => stream.write(row)))
       .catch(function (err) {
-        stream.emit('error', err);
+        stream.emit("error", err);
       })
       .then(function () {
         stream.end();
       });
   }
-};
+}
 
 module.exports = Client_D1;
